@@ -1,25 +1,20 @@
 const express = require("express");
-const app = express();
+const db = require("./database");
 
+const app = express();
 app.use(express.json());
 
-// in memory storage for now
-let tasks = [
-  { id: 1, title: "Learn Node.js", done: false },
-  { id: 2, title: "Build a CRUD API", done: false },
-  { id: 3, title: "Connect to SQLite", done: false },
-];
-
-let nextId = 4;
-
-// getting all tasks
+// GET all tasks
 app.get("/tasks", (req, res) => {
+  const tasks = db.prepare("SELECT * FROM tasks").all();
   res.json(tasks);
 });
 
-// getting a single task
+// GET one task
 app.get("/tasks/:id", (req, res) => {
-  const task = tasks.find((t) => t.id === Number(req.params.id));
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(req.params.id);
   if (!task) return res.status(404).json({ error: "Task not found" });
   res.json(task);
 });
@@ -30,26 +25,42 @@ app.post("/tasks", (req, res) => {
   if (!title || title.trim() === "") {
     return res.status(400).json({ error: "Title is required" });
   }
-  const task = { id: nextId++, title, done: false };
-  tasks.push(task);
+  const result = db
+    .prepare("INSERT INTO tasks (title, done) VALUES (?, ?)")
+    .run(title, 0);
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(result.lastInsertRowid);
   res.status(201).json(task);
 });
 
 // PUT update a task
 app.put("/tasks/:id", (req, res) => {
-  const task = tasks.find((t) => t.id === Number(req.params.id));
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(req.params.id);
   if (!task) return res.status(404).json({ error: "Task not found" });
   const { title, done } = req.body;
-  if (title !== undefined) task.title = title;
-  if (done !== undefined) task.done = done;
-  res.json(task);
+  const newTitle = title !== undefined ? title : task.title;
+  const newDone = done !== undefined ? (done ? 1 : 0) : task.done;
+  db.prepare("UPDATE tasks SET title = ?, done = ? WHERE id = ?").run(
+    newTitle,
+    newDone,
+    req.params.id,
+  );
+  const updated = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(req.params.id);
+  res.json(updated);
 });
 
 // DELETE a task
 app.delete("/tasks/:id", (req, res) => {
-  const index = tasks.findIndex((t) => t.id === Number(req.params.id));
-  if (index === -1) return res.status(404).json({ error: "Task not found" });
-  tasks.splice(index, 1);
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(req.params.id);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  db.prepare("DELETE FROM tasks WHERE id = ?").run(req.params.id);
   res.status(204).send();
 });
 
