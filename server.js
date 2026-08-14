@@ -23,6 +23,8 @@ function logQuarantine(entry) {
 const client = new OpenAI({
   baseURL: process.env.LLM_BASE_URL,
   apiKey: process.env.LLM_API_KEY,
+  timeout: 30000, // 30 seconds
+  maxRetries: 0,
 });
 
 // GET all tasks
@@ -115,6 +117,12 @@ app.post("/enrich", async (req, res) => {
 
   const input = parseResult.data;
 
+  if (process.env.LLM_ENABLED === "false") {
+    return res.status(503).json({
+      message: "LLM enrichment is temporarily disabled.",
+    });
+  }
+
   if (process.env.LLM_STUB === "1") {
     const stubResponse = {
       category: "fiction",
@@ -127,15 +135,53 @@ app.post("/enrich", async (req, res) => {
   const promptVersion = "enrich-v1";
   const promptText = fs.readFileSync(`prompts/${promptVersion}.md`, "utf8");
 
-  async function callModel(messages) {
-    const response = await client.chat.completions.create({
-      model: process.env.LLM_MODEL,
-      temperature: 0.2,
-      messages,
-    });
-    return response.choices[0].message.content;
+  function logCost(entry) {
+    fs.mkdirSync("logs", { recursive: true });
+    fs.appendFileSync(
+      "logs/cost.jsonl",
+      JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n",
+    );
   }
 
+  async function callModel(messages, attempt = 1) {
+    const startTime = Date.now();
+    try {
+      const response = await client.chat.completions.create({
+        model: process.env.LLM_MODEL,
+        temperature: 0.2,
+        messages,
+      });
+
+      const durationMs = Date.now() - startTime;
+      logCost({
+        prompt_version: "enrich-v1",
+        model: process.env.LLM_MODEL,
+        input_tokens: response.usage?.prompt_tokens,
+        output_tokens: response.usage?.completion_tokens,
+        duration_ms: durationMs,
+        attempt,
+      });
+
+      return response.choices[0].message.content;
+    } catch (error) {
+      const status = error.status;
+      const retryable =
+        status === 429 ||
+        (status >= 500 && status < 600) ||
+        error.name === "APIConnectionTimeoutError";
+
+      if (retryable && attempt < 2) {
+        const backoff = 1000 * attempt + Math.random() * 300; // backoff + jitter
+        console.log(
+          `Model call failed (${status || error.name}), retrying in ${Math.round(backoff)}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        return callModel(messages, attempt + 1);
+      }
+
+      throw error;
+    }
+  }
   const messages = [
     { role: "system", content: promptText },
     { role: "user", content: JSON.stringify(input) },
