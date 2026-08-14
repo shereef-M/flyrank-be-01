@@ -3,9 +3,22 @@ const pool = require("./db");
 const { EnrichInputSchema, EnrichOutputSchema } = require("./src/llm/schema");
 const OpenAI = require("openai");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
+
+function extractJson(rawText) {
+  // Strip a code fence if the model wrapped its answer in one
+  const fenceMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenceMatch ? fenceMatch[1] : rawText;
+  return JSON.parse(candidate.trim());
+}
+
+function logQuarantine(entry) {
+  fs.mkdirSync("logs", { recursive: true });
+  fs.appendFileSync("logs/quarantine.jsonl", JSON.stringify(entry) + "\n");
+}
 
 const client = new OpenAI({
   baseURL: process.env.LLM_BASE_URL,
@@ -108,29 +121,75 @@ app.post("/enrich", async (req, res) => {
       summary: "A stubbed summary for testing purposes.",
       quality_flags: [],
     };
-
-    const validated = EnrichOutputSchema.parse(stubResponse);
-    return res.status(200).json(validated);
+    return res.status(200).json(EnrichOutputSchema.parse(stubResponse));
   }
 
-  // Real model call
-  const promptText = fs.readFileSync("prompts/enrich-v1.md", "utf8");
+  const promptVersion = "enrich-v1";
+  const promptText = fs.readFileSync(`prompts/${promptVersion}.md`, "utf8");
 
-  const response = await client.chat.completions.create({
-    model: process.env.LLM_MODEL,
-    temperature: 0.2,
-    messages: [
-      { role: "system", content: promptText },
-      { role: "user", content: JSON.stringify(input) },
-    ],
-  });
+  async function callModel(messages) {
+    const response = await client.chat.completions.create({
+      model: process.env.LLM_MODEL,
+      temperature: 0.2,
+      messages,
+    });
+    return response.choices[0].message.content;
+  }
 
-  const rawText = response.choices[0].message.content;
+  const messages = [
+    { role: "system", content: promptText },
+    { role: "user", content: JSON.stringify(input) },
+  ];
 
-  // Stage 3 will parse and validate this — for now just return it raw
-  return res.status(200).json({ raw: rawText });
+  let rawText = await callModel(messages);
+  let parsed, validated;
+
+  try {
+    parsed = extractJson(rawText);
+    validated = EnrichOutputSchema.safeParse(parsed);
+  } catch (parseError) {
+    validated = { success: false, error: { message: parseError.message } };
+  }
+
+  if (!validated.success) {
+    // Repair retry: give the model its own broken output + the error
+    const repairMessages = [
+      ...messages,
+      { role: "assistant", content: rawText },
+      {
+        role: "user",
+        content: `Your previous answer was rejected for this reason: ${JSON.stringify(
+          validated.error,
+        )}. Return only corrected JSON matching the schema.`,
+      },
+    ];
+
+    rawText = await callModel(repairMessages);
+
+    try {
+      parsed = extractJson(rawText);
+      validated = EnrichOutputSchema.safeParse(parsed);
+    } catch (parseError) {
+      validated = { success: false, error: { message: parseError.message } };
+    }
+  }
+
+  if (!validated.success) {
+    logQuarantine({
+      timestamp: new Date().toISOString(),
+      input,
+      prompt_version: promptVersion,
+      raw_output: rawText,
+      error: validated.error,
+    });
+
+    return res.status(422).json({
+      message: "Model output could not be validated after one repair attempt.",
+    });
+  }
+
+  return res.status(200).json(validated.data);
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
