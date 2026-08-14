@@ -1,9 +1,16 @@
 const express = require("express");
 const pool = require("./db");
 const { EnrichInputSchema, EnrichOutputSchema } = require("./src/llm/schema");
+const OpenAI = require("openai");
+const fs = require("fs");
 
 const app = express();
 app.use(express.json());
+
+const client = new OpenAI({
+  baseURL: process.env.LLM_BASE_URL,
+  apiKey: process.env.LLM_API_KEY,
+});
 
 // GET all tasks
 app.get("/tasks", async (req, res) => {
@@ -106,8 +113,22 @@ app.post("/enrich", async (req, res) => {
     return res.status(200).json(validated);
   }
 
-  // Real model call comes in Stage 2/3 — not yet
-  return res.status(501).json({ message: "Not implemented yet" });
+  // Real model call
+  const promptText = fs.readFileSync("prompts/enrich-v1.md", "utf8");
+
+  const response = await client.chat.completions.create({
+    model: process.env.LLM_MODEL,
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: promptText },
+      { role: "user", content: JSON.stringify(input) },
+    ],
+  });
+
+  const rawText = response.choices[0].message.content;
+
+  // Stage 3 will parse and validate this — for now just return it raw
+  return res.status(200).json({ raw: rawText });
 });
 
 const PORT = process.env.PORT || 3000;
