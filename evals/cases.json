@@ -1,0 +1,66 @@
+[
+  {
+    "input": {
+      "title": "The Hobbit",
+      "price_gbp": 12.99,
+      "description": "A fantasy adventure novel following Bilbo Baggins on an unexpected journey."
+    },
+    "expected_category": "fiction"
+  },
+  {
+    "input": {
+      "title": "Pride and Prejudice",
+      "price_gbp": 9.99,
+      "description": "A classic novel about love, class and reputation in Georgian England."
+    },
+    "expected_category": "fiction"
+  },
+  {
+    "input": {
+      "title": "Sapiens: A Brief History of Humankind",
+      "price_gbp": 14.5,
+      "description": "An exploration of how Homo sapiens came to dominate the world."
+    },
+    "expected_category": "nonfiction"
+  },
+  {
+    "input": {
+      "title": "A History of Rome",
+      "price_gbp": 15.0,
+      "description": "A comprehensive account of the Roman Empire from founding to fall."
+    },
+    "expected_category": "nonfiction"
+  },
+  {
+    "input": {
+      "title": "The Gruffalo",
+      "price_gbp": 6.99,
+      "description": "A picture book about a mouse who invents a scary monster to avoid being eaten."
+    },
+    "expected_category": "childrens"
+  },
+  {
+    "input": {
+      "title": "Where the Wild Things Are",
+      "price_gbp": 7.5,
+      "description": "A picture book following a boy's imaginative journey to an island of monsters."
+    },
+    "expected_category": "childrens"
+  },
+  {
+    "input": {
+      "title": "Untitled Notes",
+      "price_gbp": 5.0,
+      "description": null
+    },
+    "expected_category": "other"
+  },
+  {
+    "input": {
+      "title": "Cooking Basics",
+      "price_gbp": 999.99,
+      "description": "A beginner's guide to home cooking techniques."
+    },
+    "expected_category": "nonfiction"
+  }
+]
