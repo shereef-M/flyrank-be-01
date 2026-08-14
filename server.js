@@ -1,5 +1,6 @@
 const express = require("express");
 const pool = require("./db");
+const { EnrichInputSchema, EnrichOutputSchema } = require("./src/llm/schema");
 
 const app = express();
 app.use(express.json());
@@ -80,6 +81,33 @@ app.delete("/tasks/:id", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.post("/enrich", async (req, res) => {
+  const parseResult = EnrichInputSchema.safeParse(req.body);
+
+  if (!parseResult.success) {
+    const firstIssue = parseResult.error.issues[0];
+    return res.status(400).json({
+      message: `Invalid input: ${firstIssue.path.join(".")} — ${firstIssue.message}`,
+    });
+  }
+
+  const input = parseResult.data;
+
+  if (process.env.LLM_STUB === "1") {
+    const stubResponse = {
+      category: "fiction",
+      summary: "A stubbed summary for testing purposes.",
+      quality_flags: [],
+    };
+
+    const validated = EnrichOutputSchema.parse(stubResponse);
+    return res.status(200).json(validated);
+  }
+
+  // Real model call comes in Stage 2/3 — not yet
+  return res.status(501).json({ message: "Not implemented yet" });
 });
 
 const PORT = process.env.PORT || 3000;
